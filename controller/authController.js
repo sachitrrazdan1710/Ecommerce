@@ -8,19 +8,19 @@ const registerController = async (req, res) => {
 
         // Validation
         if (!name) {
-            return res.status(400).send({ error: 'Name is required' });
+            return res.status(400).send({ message: 'Name is required' });
         }
         if (!email) {
-            return res.status(400).send({ error: 'Email is required' });
+            return res.status(400).send({ message: 'Email is required' });
         }
         if (!password) {
-            return res.status(400).send({ error: 'Password is required' });
+            return res.status(400).send({ message: 'Password is required' });
         }
         if (!phone) {
-            return res.status(400).send({ error: 'Phone number is required' });
+            return res.status(400).send({ message: 'Phone number is required' });
         }
         if (!address) {
-            return res.status(400).send({ error: 'Address is required' });
+            return res.status(400).send({ message: 'Address is required' });
         }
 
         // Check if user already exists

@@ -1,4 +1,5 @@
 const productModel = require("../models/productModel")
+const categoryModel = require("../models/CategoryModel")
 const fs = require('fs')
 const slugify = require('slugify')
 
@@ -287,4 +288,25 @@ const relatedProductController = async (req,res) => {
     }
 }
 
-module.exports = {createProductController,getProductController,getSingleProductController,productPhotoController,deleteProductController,updateProductController,productFiltersController,productCountController,productListController,searchProductController,relatedProductController}
+// get product by category
+
+const productCategoryController = async (req, res) => {
+    try {
+      const category = await categoryModel.findOne({ slug: req.params.slug });
+      const products = await productModel.find({ category }).populate('category');
+      
+      res.status(200).json({
+        success: true,
+        category,
+        products,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error,
+        message: "Something went wrong while getting products"
+      });
+    }
+  };
+  
+module.exports = {createProductController,getProductController,getSingleProductController,productPhotoController,deleteProductController,updateProductController,productFiltersController,productCountController,productListController,searchProductController,relatedProductController,productCategoryController}

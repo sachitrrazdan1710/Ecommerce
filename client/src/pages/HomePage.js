@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/Layout/Layout";
+import { useNavigate } from "react-router-dom";
 
 import axios from "axios";
 import { Checkbox, Radio } from "antd";
 import { Prices } from "../components/Prices";
 
 const HomePage = () => {
+  const navigate = useNavigate()
   const [products, SetProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [checked, setChecked] = useState([]);
@@ -142,7 +144,7 @@ useEffect(() => {
           </div>
         </div>
         <div className="col-md-9">
-          {JSON.stringify(radio, null, 4)}
+          {/* {JSON.stringify(radio, null, 4)} */}
           <h1 className="text-center">All Products</h1>
           <div className="d-flex flex-wrap">
             {products?.map((p) => (
@@ -158,7 +160,7 @@ useEffect(() => {
                     {p.description.substring(0, 30)}...
                   </p>
                   <p className="card-text"> $ {p.price}</p>
-                  <button class="btn btn-primary ms-1">More Details</button>
+                  <button class="btn btn-primary ms-1" onClick={() => navigate(`/product/${p.slug}`)} >More Details</button>
                   <button class="btn btn-secondary ms-1">Add To Cart</button>
                 </div>
               </div>

@@ -76,7 +76,7 @@ const getSimilarProduct = async (pid,cid) =>{
                   <p className="card-text">
                     {p.description.substring(0, 30)}...
                   </p>
-                  <p className="card-text"> $ {p.price}</p>
+                  <p className="card-text"> ₹ {p.price}</p>
                  
                   <button class="btn btn-secondary ms-1">Add To Cart</button>
                 </div>

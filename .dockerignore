@@ -1,6 +1,15 @@
+# Ignore root-level node_modules and logs
 node_modules
 npm-debug.log
-Dockerfile
-docker-compose.yml
+
+# Ignore client-side build artifacts and deps
+client/node_modules
+client/package-lock.json
+
+# Ignore environment and config files (already present — good)
 .env
 .git
+
+# Optional: Ignore Docker-related files from being copied into container
+Dockerfile
+docker-compose.yml

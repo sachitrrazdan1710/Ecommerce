@@ -1,27 +1,14 @@
 version: "3.8"
 
 services:
-  mongo:
-    image: mongo
-    container_name: ecommerce-mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    networks:
-      - app-network
-
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ecommerce-backend
     env_file:
       - .env
     expose:
       - "5000"
-    depends_on:
-      - mongo
     networks:
       - app-network
 
@@ -29,7 +16,6 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: ecommerce-frontend
     stdin_open: true
     tty: true
     expose:
@@ -39,7 +25,6 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: ecommerce-nginx
     ports:
       - "80:80"
     volumes:
@@ -49,9 +34,6 @@ services:
       - frontend
     networks:
       - app-network
-
-volumes:
-  mongo-data:
 
 networks:
   app-network:

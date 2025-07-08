@@ -19,7 +19,7 @@ services:
     stdin_open: true
     tty: true
     env_file:
-      - secure_envs/frontend.env
+      - client/.env
     expose:
       - "3000"
     networks:

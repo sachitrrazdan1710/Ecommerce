@@ -35,10 +35,13 @@ jobs:
           echo "✅ Nginx config found."
         fi
 
-    - name: 🔨 Build / Rebuild Docker images
+    # 🔨 IMPORTANT CHANGE HERE:
+    # We REMOVED --no-cache so Docker does NOT try to pull base images again.
+    - name: 🔨 Build / Rebuild Docker images (cached)
       run: |
-        docker-compose build --no-cache
+        docker-compose build
 
+    # 🚀 Start / recreate stack with new code
     - name: 🚀 Recreate and start containers
       run: |
         docker-compose up -d --force-recreate --remove-orphans
@@ -47,6 +50,7 @@ jobs:
       run: |
         docker ps
 
+    # 🧹 Cleanup plaintext env files from workspace
     - name: 🧹 Cleanup env files from disk
       if: always()
       run: |

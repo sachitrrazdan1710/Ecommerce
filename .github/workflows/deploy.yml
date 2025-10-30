@@ -1,0 +1,60 @@
+name: Build and Deploy Ecommerce Locally
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, wsl, docker]
+
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+
+    # Recreate env files (these secrets come from GitHub repo settings)
+    - name: 🔐 Recreate backend.env and frontend.env from secrets
+      run: |
+        echo "${{ secrets.BACKEND_ENV_FILE }}" > backend.env
+        echo "${{ secrets.FRONTEND_ENV_FILE }}" > frontend.env
+
+    # Copy them where the app expects them (this matches your Jenkins logic)
+    - name: 📁 Place env files in backend and frontend
+      run: |
+        # backend expects .env in root (adjust if your backend is in /server or /api)
+        cp backend.env .env
+
+        # frontend expects .env inside client/.env (matches your Jenkins script)
+        mkdir -p client
+        cp frontend.env client/.env
+
+    # Optional: verify nginx config like in Jenkins
+    - name: 🔍 Verify Nginx config exists
+      run: |
+        if [ ! -f nginx/conf.d/default.conf ]; then
+          echo "❌ Nginx config file missing!"
+          exit 1
+        else
+          echo "✅ Nginx config found."
+        fi
+
+    # Build images using docker compose (must have docker-compose.yml in repo)
+    - name: 🔨 Build Docker images
+      run: |
+        docker compose build
+
+    # Bring containers up (this *deploys* to your WSL runner machine)
+    - name: 🚀 Deploy with docker compose
+      run: |
+        docker compose up -d
+
+    # Show running containers, like Jenkins did
+    - name: 📦 Check running containers
+      run: |
+        docker ps
+
+    # Cleanup the sensitive .env files from disk
+    - name: 🧹 Cleanup env files
+      if: always()
+      run: |
+        rm -f .env client/.env backend.env frontend.env

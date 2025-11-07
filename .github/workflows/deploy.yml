@@ -1,57 +1,100 @@
-name: Build and Deploy Ecommerce Locally
+name: Deploy to ECS (Fargate)
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION:        ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID:    ${{ vars.AWS_ACCOUNT_ID }}
+  ECR_REPO_NGINX:    ${{ vars.ECR_REPO_NGINX }}
+  ECR_REPO_FRONTEND: ${{ vars.ECR_REPO_FRONTEND }}
+  ECR_REPO_BACKEND:  ${{ vars.ECR_REPO_BACKEND }}
+  ECS_CLUSTER:       ${{ vars.ECS_CLUSTER }}
+  ECS_SERVICE:       ${{ vars.ECS_SERVICE }}
+  SECRET_ARN:        ${{ vars.SECRET_ARN }}
 
 jobs:
-  build-and-deploy:
-    runs-on: [self-hosted, wsl, docker]
+  deploy:
+    runs-on: ubuntu-latest
 
     steps:
-    - name: 📥 Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: 🔐 Write env secrets to files
-      run: |
-        echo "${{ secrets.BACKEND_ENV_FILE }}" > backend.env
-        echo "${{ secrets.FRONTEND_ENV_FILE }}" > frontend.env
+      - name: Configure AWS credentials (static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
 
-    - name: 📁 Place env files where services expect them
-      run: |
-        # backend expects .env at repo root
-        cp backend.env .env
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-        # frontend expects .env at client/.env
-        mkdir -p client
-        cp frontend.env client/.env
+      # Optional: sync GitHub Secrets into AWS Secrets Manager
+      - name: Sync app secrets into AWS Secrets Manager
+        if: ${{ secrets.DATABASE_URL != '' && secrets.JWT_SECRET != '' }}
+        env:
+          SM_ARN:       ${{ env.SECRET_ARN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET:   ${{ secrets.JWT_SECRET }}
+        run: |
+          JSON=$(jq -n \
+            --arg db "$DATABASE_URL" \
+            --arg jwt "$JWT_SECRET" \
+            '{DATABASE_URL:$db, JWT_SECRET:$jwt}')
+          aws secretsmanager put-secret-value --secret-id "$SM_ARN" --secret-string "$JSON" || \
+          aws secretsmanager create-secret --name "$(basename "$SM_ARN")" --secret-string "$JSON"
 
-    - name: 🔍 Verify Nginx config exists
-      run: |
-        if [ ! -f nginx/conf.d/default.conf ]; then
-          echo "❌ Nginx config file missing at nginx/conf.d/default.conf"
-          exit 1
-        else
-          echo "✅ Nginx config found."
-        fi
+      - name: Build & push Nginx image
+        working-directory: ./nginx
+        run: |
+          NGINX_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NGINX}:${GITHUB_SHA}
+          docker build -t $NGINX_IMAGE .
+          docker push $NGINX_IMAGE
+          echo "NGINX_IMAGE=$NGINX_IMAGE" >> $GITHUB_ENV
 
-    # 🔨 IMPORTANT CHANGE HERE:
-    # We REMOVED --no-cache so Docker does NOT try to pull base images again.
-    - name: 🔨 Build / Rebuild Docker images (cached)
-      run: |
-        docker-compose build
+      - name: Build & push Frontend image
+        working-directory: ./client
+        run: |
+          FRONTEND_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_FRONTEND}:${GITHUB_SHA}
+          docker build -t $FRONTEND_IMAGE .
+          docker push $FRONTEND_IMAGE
+          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
 
-    # 🚀 Start / recreate stack with new code
-    - name: 🚀 Recreate and start containers
-      run: |
-        docker-compose up -d --force-recreate --remove-orphans
+      - name: Build & push Backend image
+        working-directory: .
+        run: |
+          BACKEND_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_BACKEND}:${GITHUB_SHA}
+          docker build -t $BACKEND_IMAGE .
+          docker push $BACKEND_IMAGE
+          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
 
-    - name: 📦 Show running containers
-      run: |
-        docker ps
+      - name: Render task definition
+        run: |
+          sed -e "s|\${AWS_REGION}|$AWS_REGION|g" \
+              -e "s|\${AWS_ACCOUNT_ID}|$AWS_ACCOUNT_ID|g" \
+              -e "s|\${NGINX_IMAGE}|$NGINX_IMAGE|g" \
+              -e "s|\${FRONTEND_IMAGE}|$FRONTEND_IMAGE|g" \
+              -e "s|\${BACKEND_IMAGE}|$BACKEND_IMAGE|g" \
+              ecs/taskdef.json > ecs/taskdef.rendered.json
 
-    # 🧹 Cleanup plaintext env files from workspace
-    - name: 🧹 Cleanup env files from disk
-      if: always()
-      run: |
-        rm -f .env client/.env backend.env frontend.env
+      - name: Register task definition
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://ecs/taskdef.rendered.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --force-new-deployment

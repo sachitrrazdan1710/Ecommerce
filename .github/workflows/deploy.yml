@@ -26,7 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (static keys)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -35,21 +35,6 @@ jobs:
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-
-      # Optional: sync GitHub Secrets into AWS Secrets Manager
-      - name: Sync app secrets into AWS Secrets Manager
-        if: ${{ secrets.DATABASE_URL != '' && secrets.JWT_SECRET != '' }}
-        env:
-          SM_ARN:       ${{ env.SECRET_ARN }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          JWT_SECRET:   ${{ secrets.JWT_SECRET }}
-        run: |
-          JSON=$(jq -n \
-            --arg db "$DATABASE_URL" \
-            --arg jwt "$JWT_SECRET" \
-            '{DATABASE_URL:$db, JWT_SECRET:$jwt}')
-          aws secretsmanager put-secret-value --secret-id "$SM_ARN" --secret-string "$JSON" || \
-          aws secretsmanager create-secret --name "$(basename "$SM_ARN")" --secret-string "$JSON"
 
       - name: Build & push Nginx image
         working-directory: ./nginx
@@ -82,6 +67,7 @@ jobs:
               -e "s|\${NGINX_IMAGE}|$NGINX_IMAGE|g" \
               -e "s|\${FRONTEND_IMAGE}|$FRONTEND_IMAGE|g" \
               -e "s|\${BACKEND_IMAGE}|$BACKEND_IMAGE|g" \
+              -e "s|\${SECRET_ARN}|$SECRET_ARN|g" \
               ecs/taskdef.json > ecs/taskdef.rendered.json
 
       - name: Register task definition
@@ -97,4 +83,5 @@ jobs:
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_SERVICE" \
             --task-definition "$TASK_DEF_ARN" \
-            --force-new-deployment
+            --force-new-deployment || \
+          echo "If service doesn't exist yet, create it from the console once (next step)."

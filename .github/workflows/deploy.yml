@@ -7,18 +7,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
-  # read from GitHub SECRETS (you already created them)
   AWS_REGION:        ${{ secrets.AWS_REGION }}
   AWS_ACCOUNT_ID:    ${{ secrets.AWS_ACCOUNT_ID }}
-  ECR_REPO_NGINX:    ${{ secrets.ECR_REPO_NGINX }}        # e.g. ecommerce-nginx
-  ECR_REPO_FRONTEND: ${{ secrets.ECR_REPO_FRONTEND }}     # e.g. ecommerce-frontend
-  ECR_REPO_BACKEND:  ${{ secrets.ECR_REPO_BACKEND }}      # e.g. ecommerce-backend
-  ECS_CLUSTER:       ${{ secrets.ECS_CLUSTER }}           # ecs-ecommerce
-  ECS_SERVICE:       ${{ secrets.ECS_SERVICE }}           # you’ll create this next
-  SECRET_ARN:        ${{ secrets.SECRET_ARN }}            # arn:aws:secretsmanager:...
+  ECR_REPO_NGINX:    ${{ secrets.ECR_REPO_NGINX }}
+  ECR_REPO_FRONTEND: ${{ secrets.ECR_REPO_FRONTEND }}
+  ECR_REPO_BACKEND:  ${{ secrets.ECR_REPO_BACKEND }}
+  ECS_CLUSTER:       ${{ secrets.ECS_CLUSTER }}
+  ECS_SERVICE:       ${{ secrets.ECS_SERVICE }}
+  SECRET_ARN:        ${{ secrets.SECRET_ARN }}
 
 jobs:
   deploy:
@@ -38,6 +36,12 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      # create the CloudWatch Logs group if it doesn't exist
+      - name: Ensure log group exists
+        run: |
+          aws logs create-log-group --log-group-name /ecs/ecommerce || true
+
+      # -------------- IMPORTANT: adjust these 3 working-directory paths --------------
       - name: Build & push Nginx image
         working-directory: ./nginx
         run: |
@@ -55,7 +59,6 @@ jobs:
           echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
 
       - name: Build & push Backend image
-        # change this path if your backend Dockerfile is elsewhere
         working-directory: .
         run: |
           BACKEND_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_BACKEND}:${GITHUB_SHA}
@@ -63,7 +66,6 @@ jobs:
           docker push $BACKEND_IMAGE
           echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
 
-      # IMPORTANT: your taskdef is at Ecommerce/ecs/taskdef.json
       - name: Render task definition
         run: |
           sed -e "s|\${AWS_REGION}|$AWS_REGION|g" \
@@ -71,17 +73,15 @@ jobs:
               -e "s|\${NGINX_IMAGE}|$NGINX_IMAGE|g" \
               -e "s|\${FRONTEND_IMAGE}|$FRONTEND_IMAGE|g" \
               -e "s|\${BACKEND_IMAGE}|$BACKEND_IMAGE|g" \
-              Ecommerce/ecs/taskdef.json > Ecommerce/ecs/taskdef.rendered.json
+              ecs/taskdef.json > ecs/taskdef.rendered.json
 
       - name: Register task definition
         run: |
           TASK_DEF_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file://Ecommerce/ecs/taskdef.rendered.json \
+            --cli-input-json file://ecs/taskdef.rendered.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
-          echo "Registered: $TASK_DEF_ARN"
 
-      # This will succeed only AFTER you create the ECS Service once (next section)
       - name: Update ECS service
         run: |
           aws ecs update-service \

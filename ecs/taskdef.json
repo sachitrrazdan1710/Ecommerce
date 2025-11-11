@@ -1,66 +1,138 @@
-{
-  "family": "ecommerce-task",
-  "networkMode": "awsvpc",
-  "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
-  "containerDefinitions": [
-    {
-      "name": "nginx",
-      "image": "${NGINX_IMAGE}",
-      "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
-      "essential": true,
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/ecommerce",
-          "awslogs-region": "${AWS_REGION}",
-          "awslogs-stream-prefix": "nginx"
-        }
-      }
-    },
-    {
-      "name": "frontend",
-      "image": "${FRONTEND_IMAGE}",
-      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
-      "environment": [
-        { "name": "REACT_APP_API", "value": "http://nginx" },
-        { "name": "HOST", "value": "0.0.0.0" }
-      ],
-      "essential": true,
-      "dependsOn": [{ "containerName": "backend", "condition": "START" }],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/ecommerce",
-          "awslogs-region": "${AWS_REGION}",
-          "awslogs-stream-prefix": "frontend"
-        }
-      }
-    },
-    {
-      "name": "backend",
-      "image": "${BACKEND_IMAGE}",
-      "portMappings": [{ "containerPort": 5000, "protocol": "tcp" }],
-      "environment": [
-        { "name": "PORT", "value": "5000" },
-        { "name": "DEV_MODE", "value": "production" }
-      ],
-      "secrets": [
-        { "name": "MONGO_URL",  "valueFrom": "${SECRET_ARN}:MONGO_URL::" },
-        { "name": "JWT_SECRET", "valueFrom": "${SECRET_ARN}:JWT_SECRET::" }
-      ],
-      "essential": true,
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/ecommerce",
-          "awslogs-region": "${AWS_REGION}",
-          "awslogs-stream-prefix": "backend"
-        }
-      }
-    }
-  ]
-}
+name: Deploy to ECS (Fargate)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION:        ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID:    ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPO_NGINX:    ${{ secrets.ECR_REPO_NGINX }}
+  ECR_REPO_FRONTEND: ${{ secrets.ECR_REPO_FRONTEND }}
+  ECR_REPO_BACKEND:  ${{ secrets.ECR_REPO_BACKEND }}
+  ECS_CLUSTER:       ${{ secrets.ECS_CLUSTER }}
+  ECS_SERVICE:       ${{ secrets.ECS_SERVICE }}
+  SECRET_ARN:        ${{ secrets.SECRET_ARN }}
+  SERVICE_SG:        ${{ secrets.SERVICE_SG }}
+  SUBNETS:           ${{ secrets.SUBNETS }}         # e.g. subnet-aaa,subnet-bbb
+  TARGET_GROUP_ARN:  ${{ secrets.TARGET_GROUP_ARN }}# tg-ecommerce-web ARN
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Build & push Nginx
+      - name: Build & push Nginx image
+        working-directory: ./nginx
+        run: |
+          set -e
+          NGINX_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NGINX}:${GITHUB_SHA}
+          docker build -t "$NGINX_IMAGE" .
+          docker push "$NGINX_IMAGE"
+          echo "NGINX_IMAGE=$NGINX_IMAGE" >> $GITHUB_ENV
+
+      # Build & push Frontend
+      - name: Build & push Frontend image
+        working-directory: ./client
+        run: |
+          set -e
+          FRONTEND_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_FRONTEND}:${GITHUB_SHA}
+          docker build -t "$FRONTEND_IMAGE" .
+          docker push "$FRONTEND_IMAGE"
+          echo "FRONTEND_IMAGE=$FRONTEND_IMAGE" >> $GITHUB_ENV
+
+      # Build & push Backend (Dockerfile at repo root)
+      - name: Build & push Backend image
+        working-directory: .
+        run: |
+          set -e
+          BACKEND_IMAGE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_BACKEND}:${GITHUB_SHA}
+          docker build -t "$BACKEND_IMAGE" .
+          docker push "$BACKEND_IMAGE"
+          echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
+
+      # Ensure CW log group exists (harmless if already there)
+      - name: Ensure CloudWatch log group
+        run: |
+          aws logs describe-log-groups \
+            --log-group-name-prefix "/ecs/ecommerce" \
+            --query 'logGroups[?logGroupName==`/ecs/ecommerce`]' \
+            --output text || \
+          aws logs create-log-group --log-group-name "/ecs/ecommerce"
+
+      # Render task definition (NOTE: now replacing SECRET_ARN too)
+      - name: Render task definition
+        run: |
+          sed -e "s|\${AWS_REGION}|$AWS_REGION|g" \
+              -e "s|\${AWS_ACCOUNT_ID}|$AWS_ACCOUNT_ID|g" \
+              -e "s|\${NGINX_IMAGE}|$NGINX_IMAGE|g" \
+              -e "s|\${FRONTEND_IMAGE}|$FRONTEND_IMAGE|g" \
+              -e "s|\${BACKEND_IMAGE}|$BACKEND_IMAGE|g" \
+              -e "s|\${SECRET_ARN}|$SECRET_ARN|g" \
+              ecs/taskdef.json > ecs/taskdef.rendered.json
+          echo "---- rendered ----"
+          cat ecs/taskdef.rendered.json
+
+      - name: Register task definition
+        run: |
+          set -e
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://ecs/taskdef.rendered.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN"
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
+
+      # Create the ECS service once if it doesn't exist
+      - name: Create ECS service if missing
+        run: |
+          set -e
+          EXISTING=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].status' --output text || true)
+
+          if [ "$EXISTING" = "ACTIVE" ] || [ "$EXISTING" = "DRAINING" ]; then
+            echo "Service already exists."
+          else
+            # SUBNETS secret must be comma-separated; AWS CLI wants JSON array
+            IFS=',' read -r SUB1 SUB2 <<< "$SUBNETS"
+            aws ecs create-service \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$ECS_SERVICE" \
+              --task-definition "$TASK_DEF_ARN" \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --platform-version LATEST \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUB1,$SUB2],securityGroups=[$SERVICE_SG],assignPublicIp=ENABLED}" \
+              --load-balancers "targetGroupArn=$TARGET_GROUP_ARN,containerName=nginx,containerPort=80" \
+              --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
+              --health-check-grace-period-seconds 60
+          fi
+
+      # Update (rolling deploy) if service exists
+      - name: Update ECS service
+        run: |
+          set -e
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$TASK_DEF_ARN" \
+            --force-new-deployment

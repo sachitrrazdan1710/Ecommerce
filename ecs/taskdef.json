@@ -4,38 +4,46 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-
   "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
-  "taskRoleArn": "",
-
+  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "nginx",
       "image": "${NGINX_IMAGE}",
+      "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
       "essential": true,
-      "portMappings": [
-        { "containerPort": 80, "protocol": "tcp" }
-      ]
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ecommerce",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "nginx"
+        }
+      }
     },
     {
       "name": "frontend",
       "image": "${FRONTEND_IMAGE}",
-      "essential": true,
-      "portMappings": [
-        { "containerPort": 3000, "protocol": "tcp" }
-      ],
+      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
       "environment": [
         { "name": "REACT_APP_API", "value": "http://nginx" },
         { "name": "HOST", "value": "0.0.0.0" }
-      ]
+      ],
+      "essential": true,
+      "dependsOn": [{ "containerName": "backend", "condition": "START" }],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ecommerce",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "frontend"
+        }
+      }
     },
     {
       "name": "backend",
       "image": "${BACKEND_IMAGE}",
-      "essential": true,
-      "portMappings": [
-        { "containerPort": 5000, "protocol": "tcp" }
-      ],
+      "portMappings": [{ "containerPort": 5000, "protocol": "tcp" }],
       "environment": [
         { "name": "PORT", "value": "5000" },
         { "name": "DEV_MODE", "value": "production" }
@@ -43,7 +51,16 @@
       "secrets": [
         { "name": "MONGO_URL",  "valueFrom": "${SECRET_ARN}:MONGO_URL::" },
         { "name": "JWT_SECRET", "valueFrom": "${SECRET_ARN}:JWT_SECRET::" }
-      ]
+      ],
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/ecommerce",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "backend"
+        }
+      }
     }
   ]
 }

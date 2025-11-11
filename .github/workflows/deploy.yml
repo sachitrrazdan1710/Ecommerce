@@ -21,9 +21,17 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate required inputs
+        run: |
+          for v in AWS_REGION AWS_ACCOUNT_ID ECR_REPO_NGINX ECR_REPO_FRONTEND ECR_REPO_BACKEND ECS_CLUSTER ECS_SERVICE SECRET_ARN; do
+            eval "val=\${$v}"
+            [ -n "$val" ] || { echo "::error::$v is empty"; exit 1; }
+          done
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -59,10 +67,11 @@ jobs:
           docker push $BACKEND_IMAGE
           echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
 
-      - name: (One-time) create CW log group if missing
+      - name: Ensure CloudWatch log group exists
         run: |
-          aws logs describe-log-groups --log-group-name-prefix "/ecs/ecommerce" --query 'logGroups[?logGroupName==`/ecs/ecommerce`]' --output text || \
-          aws logs create-log-group --log-group-name "/ecs/ecommerce"
+          aws logs describe-log-groups --log-group-name-prefix "/ecs/ecommerce" \
+            --query 'logGroups[?logGroupName==`/ecs/ecommerce`]' --output text \
+            || aws logs create-log-group --log-group-name "/ecs/ecommerce"
 
       - name: Render task definition
         run: |
@@ -71,6 +80,7 @@ jobs:
               -e "s|\${NGINX_IMAGE}|$NGINX_IMAGE|g" \
               -e "s|\${FRONTEND_IMAGE}|$FRONTEND_IMAGE|g" \
               -e "s|\${BACKEND_IMAGE}|$BACKEND_IMAGE|g" \
+              -e "s|\${SECRET_ARN}|$SECRET_ARN|g" \
               ecs/taskdef.json > ecs/taskdef.rendered.json
 
       - name: Register task definition
@@ -79,8 +89,9 @@ jobs:
             --cli-input-json file://ecs/taskdef.rendered.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
+          echo "Registered: $TASK_DEF_ARN"
 
-      - name: Update ECS service
+      - name: Update ECS service (must already exist once)
         run: |
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \

@@ -2,7 +2,7 @@ name: Deploy to ECS (Fargate)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,6 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,12 +35,6 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # create the CloudWatch Logs group if it doesn't exist
-      - name: Ensure log group exists
-        run: |
-          aws logs create-log-group --log-group-name /ecs/ecommerce || true
-
-      # -------------- IMPORTANT: adjust these 3 working-directory paths --------------
       - name: Build & push Nginx image
         working-directory: ./nginx
         run: |
@@ -65,6 +58,11 @@ jobs:
           docker build -t $BACKEND_IMAGE .
           docker push $BACKEND_IMAGE
           echo "BACKEND_IMAGE=$BACKEND_IMAGE" >> $GITHUB_ENV
+
+      - name: (One-time) create CW log group if missing
+        run: |
+          aws logs describe-log-groups --log-group-name-prefix "/ecs/ecommerce" --query 'logGroups[?logGroupName==`/ecs/ecommerce`]' --output text || \
+          aws logs create-log-group --log-group-name "/ecs/ecommerce"
 
       - name: Render task definition
         run: |

@@ -4,19 +4,25 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::043187662969:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::043187662969:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "nginx",
       "image": "${NGINX_IMAGE}",
-      "portMappings": [{ "containerPort": 80, "protocol": "tcp" }],
+      "portMappings": [
+        { "containerPort": 80, "protocol": "tcp" }
+      ],
       "essential": true,
+      "dependsOn": [
+        { "containerName": "backend", "condition": "START" },
+        { "containerName": "frontend", "condition": "START" }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/ecommerce",
-          "awslogs-region": "${AWS_REGION}",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "nginx"
         }
       }
@@ -24,18 +30,22 @@
     {
       "name": "frontend",
       "image": "${FRONTEND_IMAGE}",
-      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "portMappings": [
+        { "containerPort": 3000, "protocol": "tcp" }
+      ],
       "environment": [
         { "name": "REACT_APP_API", "value": "/api" },
         { "name": "HOST", "value": "0.0.0.0" }
       ],
       "essential": true,
-      "dependsOn": [{ "containerName": "backend", "condition": "START" }],
+      "dependsOn": [
+        { "containerName": "backend", "condition": "START" }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/ecommerce",
-          "awslogs-region": "${AWS_REGION}",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "frontend"
         }
       }
@@ -43,21 +53,29 @@
     {
       "name": "backend",
       "image": "${BACKEND_IMAGE}",
-      "portMappings": [{ "containerPort": 5000, "protocol": "tcp" }],
+      "portMappings": [
+        { "containerPort": 5000, "protocol": "tcp" }
+      ],
       "environment": [
         { "name": "PORT", "value": "5000" },
         { "name": "DEV_MODE", "value": "production" }
       ],
       "secrets": [
-        { "name": "MONGO_URL",  "valueFrom": "${SECRET_ARN}:MONGO_URL::" },
-        { "name": "JWT_SECRET", "valueFrom": "${SECRET_ARN}:JWT_SECRET::" }
+        {
+          "name": "MONGO_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:043187662969:secret:ecommerce/dev/backend-V0O7aB:MONGO_URL::"
+        },
+        {
+          "name": "JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:043187662969:secret:ecommerce/dev/backend-V0O7aB:JWT_SECRET::"
+        }
       ],
       "essential": true,
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/ecommerce",
-          "awslogs-region": "${AWS_REGION}",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "backend"
         }
       }
